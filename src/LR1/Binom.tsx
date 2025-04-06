@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Box, Button, Slider, Typography } from '@mui/material';
 import { LineChart } from '@mui/x-charts/LineChart';
 import Table from '@mui/material/Table';
@@ -7,23 +8,27 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Paper from '@mui/material/Paper';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import jstat from 'jstat'
-import bernoulli from '@stdlib/random-base-bernoulli'
+import binomial from '@stdlib/random-base-binomial'
 import { BarChart } from '@mui/x-charts';
 import { MuiFileInput } from 'mui-file-input'
-import { read } from 'xlsx'
+import { read, utils, writeFile } from 'xlsx'
 import { getRangeData } from '../utils/getRange';
 
-export const BernulliWork = () => {
+export const Binom = () => {
+
 
     const [testFile, setTestFile] = useState(null)
     const [testMode, setTestMode] = useState(false)
+
     const [probability, setProbability] = useState<number | null>(null)
     const [sampleSize, setSampleSize] = useState<number | null>(null)
+    const [numberOfTrials, setNumberOfTrials] = useState<number | null>(null)
 
     const [probabilityRange, setProbabilityRange] = useState<number[]>([0.2, 0.8])
     const [sampleSizeRange, setSampleSizeRange] = useState<number[]>([100, 200])
+    const [numberOfTrialsRange, setNumberOfTrialsRange] = useState<number[]>([3, 7])
 
     const [tableData, setTableData] = useState<{ bin: number; frequency: number; relativeFrequency: number; theoreticalProbability: number; Fx: number }[]>([]);
 
@@ -41,19 +46,26 @@ export const BernulliWork = () => {
         setSampleSize(roundedRandomNumber)
     }
 
-    const [bernoulliSample, setBernoulliSample] = useState<number[]>([]);
+    // Генерация объема выборки
+    const getNumberOfTrials = () => {
+        const randomNumber = jstat.uniform.sample(...numberOfTrialsRange)
+        const roundedRandomNumber = randomNumber.toFixed(0)
+        setNumberOfTrials(roundedRandomNumber)
+    }
+
+    const [binomSample, setBinomSample] = useState<number[]>([]);
 
 
 
     // Расчет данных для таблицы
     const calculateTableData = () => {
-        if (!sampleSize || !probability || bernoulliSample.length === 0) return;
+        if (!sampleSize || !probability || binomSample.length === 0) return;
 
         // Уникальные значения (0 и 1)
-        const uniqueValues = [0, 1];
+        const uniqueValues = Array.from({ length: numberOfTrials }, (_, k) => k);
 
         // Расчет частот
-        const frequencyMap = bernoulliSample.reduce((acc, value) => {
+        const frequencyMap = binomSample.reduce((acc, value) => {
             acc[value] = (acc[value] || 0) + 1;
             return acc;
         }, {} as Record<number, number>);
@@ -62,8 +74,9 @@ export const BernulliWork = () => {
         const data = uniqueValues.map((bin) => {
             const frequency = frequencyMap[bin] || 0;
             const relativeFrequency = frequency / sampleSize;
-            const theoreticalProbability = bin === 0 ? 1 - probability : probability;
-            const Fx = bin === 0 ? 1 - probability : 1; // Функция распределения
+
+            const theoreticalProbability = jstat.binomial.pdf(+bin, +numberOfTrials, +probability);
+            const Fx = jstat.binomial.cdf(+bin, +numberOfTrials, +probability);
 
             return {
                 bin,
@@ -79,16 +92,17 @@ export const BernulliWork = () => {
 
     // Обновление выборки Бернулли при изменении probability или sampleSize
     useEffect(() => {
-        if (sampleSize && probability && !testMode) {
-            const sample = Array.from({ length: sampleSize }, () => bernoulli(probability));
-            setBernoulliSample(sample);
+        if (sampleSize && probability && numberOfTrials && !testMode) {
+            const sample = Array.from({ length: +sampleSize }, (_, k) => binomial(+numberOfTrials, +probability));
+            console.log(sample, sampleSize, probability, numberOfTrials)
+            setBinomSample(sample);
         }
-    }, [sampleSize, probability]);
+    }, [sampleSize, probability, numberOfTrials]);
 
     // Расчет данных для таблицы при изменении выборки
     useEffect(() => {
         calculateTableData();
-    }, [bernoulliSample]);
+    }, [binomSample]);
 
     //Обработка тестовых данных
     useEffect(() => {
@@ -105,22 +119,25 @@ export const BernulliWork = () => {
             console.log('Листы:', sheetNames);
 
             // Чтение данных из первого листа
-            const firstSheetName = sheetNames.find(name => name === 'Бернулли')
+            const firstSheetName = sheetNames.find(name => name === 'Биноминальное')
             const worksheet = workbook.Sheets[firstSheetName];
 
 
-            const probabilityCell = 'D3'
+            const probabilityCell = 'D4'
             if (worksheet[probabilityCell]) {
-                setProbability(worksheet[probabilityCell].v.toFixed(2))
+                setProbability(+worksheet[probabilityCell].v.toFixed(2))
             }
-
-            const sampleSizeCell = 'D4'
+            const numberOfTrialsCell = 'D5'
+            if (worksheet[numberOfTrialsCell]) {
+                setNumberOfTrials(+worksheet[numberOfTrialsCell].v.toFixed(0))
+            }
+            const sampleSizeCell = 'D6'
             if (worksheet[sampleSizeCell]) {
-                setSampleSize(worksheet[sampleSizeCell].v.toFixed(0))
+                setSampleSize(+worksheet[sampleSizeCell].v.toFixed(0))
             }
 
-            const bernoulliSample = getRangeData(worksheet, 'B8', 'B126')
-            setBernoulliSample(bernoulliSample)
+            const binomSample = getRangeData(worksheet, 'B9', 'B127')
+            setBinomSample(binomSample)
         }
 
         reader.readAsArrayBuffer(testFile);
@@ -158,7 +175,6 @@ export const BernulliWork = () => {
                     <Slider
                         min={100}
                         max={200}
-
                         disableSwap
                         getAriaLabel={() => 'Диапазон объема'}
                         value={sampleSizeRange}
@@ -168,18 +184,33 @@ export const BernulliWork = () => {
                     />
                     <Button onClick={getSampleSize} disabled={testMode}>Получить объем</Button>
                 </Box>
+
+                <Box display={'flex'} gap={"16px"} flexDirection={'column'}>
+                    <Typography variant='h6'>Число испытаний: {numberOfTrials}</Typography>
+                    <Slider
+                        min={3}
+                        max={7}
+                        disableSwap
+                        getAriaLabel={() => 'Диапазон объема'}
+                        value={numberOfTrialsRange}
+                        onChange={(e, newValue) => setNumberOfTrialsRange(newValue as number[])}
+                        valueLabelDisplay="auto"
+
+                    />
+                    <Button onClick={getNumberOfTrials} disabled={testMode}>Получить число испытаний</Button>
+                </Box>
             </Box>
-            {sampleSize && probability && <Box display={'flex'} gap={"16px"} flexDirection={'column'}>
+            {sampleSize && probability && numberOfTrials && <Box display={'flex'} gap={"16px"} flexDirection={'column'}>
                 <Typography variant='h6'>График распределения</Typography>
                 <LineChart
                     xAxis={[{
-                        data: Array.from({ length: bernoulliSample.length }, (_, i) => i + 1),
+                        data: Array.from({ length: binomSample.length }, (_, i) => i + 1),
                         label: 'Номер испытания',
                     }]}
                     series={[
                         {
-                            data: bernoulliSample, // Данные распределения Бернулли
-                            label: 'Результат (0 или 1)',
+                            data: binomSample, // Данные распределения Бернулли
+                            label: 'Биномиальное',
                         },
                     ]}
 
@@ -238,7 +269,7 @@ export const BernulliWork = () => {
                     <BarChart
                         xAxis={[
                             {
-                                data: ['Карман 0', 'Карман 1'], // Подписи для столбцов
+                                data: Array.from({ length: numberOfTrials }).map((_, i) => 'Карман ' + i), // Подписи для столбцов
                                 scaleType: 'band', // Используем band для категориальных данных
                             },
                         ]}
@@ -258,7 +289,7 @@ export const BernulliWork = () => {
                     <BarChart
                         xAxis={[
                             {
-                                data: ['Карман 0', 'Карман 1'], // Подписи для столбцов
+                                data: Array.from({ length: numberOfTrials }).map((_, i) => 'Карман ' + i), // Подписи для столбцов
                                 scaleType: 'band', // Используем band для категориальных данных
                             },
                         ]}
@@ -278,8 +309,5 @@ export const BernulliWork = () => {
                 </Box>
             </Box>}
         </Box>
-
-
     )
-
 }

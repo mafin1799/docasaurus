@@ -23,6 +23,8 @@
     "@mui/material": "^6.4.8",
     "@mui/x-charts": "^7.28.0",
     "@stdlib/random-base-bernoulli": "^0.2.1",
+    "@stdlib/random-base-binomial": "^0.2.1",
+    "@stdlib/random-base-poisson": "^0.2.1",
     "clsx": "^2.0.0",
     "jstat": "^1.9.6",
     "mui-file-input": "^7.0.0",

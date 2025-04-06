@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Box, Button, Slider, Typography } from '@mui/material';
 import { LineChart } from '@mui/x-charts/LineChart';
 import Table from '@mui/material/Table';
@@ -7,53 +8,53 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Paper from '@mui/material/Paper';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import jstat from 'jstat'
-import bernoulli from '@stdlib/random-base-bernoulli'
+import poisson from '@stdlib/random-base-poisson'
 import { BarChart } from '@mui/x-charts';
 import { MuiFileInput } from 'mui-file-input'
-import { read } from 'xlsx'
+import { read, utils, writeFile } from 'xlsx'
 import { getRangeData } from '../utils/getRange';
 
-export const BernulliWork = () => {
-
+export const Poisson = () => {
     const [testFile, setTestFile] = useState(null)
     const [testMode, setTestMode] = useState(false)
-    const [probability, setProbability] = useState<number | null>(null)
+
+    const [lambda, setLambda] = useState<number | null>(null)
     const [sampleSize, setSampleSize] = useState<number | null>(null)
 
-    const [probabilityRange, setProbabilityRange] = useState<number[]>([0.2, 0.8])
+    const [lambdaRange, setLambdaRange] = useState<number[]>([1, 5])
     const [sampleSizeRange, setSampleSizeRange] = useState<number[]>([100, 200])
 
     const [tableData, setTableData] = useState<{ bin: number; frequency: number; relativeFrequency: number; theoreticalProbability: number; Fx: number }[]>([]);
 
-    // Генерация вероятности
-    const getProbability = () => {
-        const randomNumber = jstat.uniform.sample(...probabilityRange)
+    // Генерация параметра λ
+    const getLambda = () => {
+        const randomNumber = jstat.uniform.sample(...lambdaRange)
         const roundedRandomNumber = randomNumber.toFixed(2)
-        setProbability(roundedRandomNumber)
+        setLambda(+roundedRandomNumber)
     }
 
     // Генерация объема выборки
     const getSampleSize = () => {
         const randomNumber = jstat.uniform.sample(...sampleSizeRange)
         const roundedRandomNumber = randomNumber.toFixed(0)
-        setSampleSize(roundedRandomNumber)
+        setSampleSize(+roundedRandomNumber)
     }
 
-    const [bernoulliSample, setBernoulliSample] = useState<number[]>([]);
-
-
+    const [poissonSample, setPoissonSample] = useState<number[]>([]);
 
     // Расчет данных для таблицы
     const calculateTableData = () => {
-        if (!sampleSize || !probability || bernoulliSample.length === 0) return;
+        if (!sampleSize || !lambda || poissonSample.length === 0) return;
 
-        // Уникальные значения (0 и 1)
-        const uniqueValues = [0, 1];
+        // Определяем диапазон значений (от минимального до максимального в выборке)
+        const minValue = Math.min(...poissonSample);
+        const maxValue = Math.max(...poissonSample);
+        const uniqueValues = Array.from({ length: maxValue - minValue + 1 }, (_, i) => minValue + i);
 
         // Расчет частот
-        const frequencyMap = bernoulliSample.reduce((acc, value) => {
+        const frequencyMap = poissonSample.reduce((acc, value) => {
             acc[value] = (acc[value] || 0) + 1;
             return acc;
         }, {} as Record<number, number>);
@@ -62,8 +63,9 @@ export const BernulliWork = () => {
         const data = uniqueValues.map((bin) => {
             const frequency = frequencyMap[bin] || 0;
             const relativeFrequency = frequency / sampleSize;
-            const theoreticalProbability = bin === 0 ? 1 - probability : probability;
-            const Fx = bin === 0 ? 1 - probability : 1; // Функция распределения
+
+            const theoreticalProbability = jstat.poisson.pdf(bin, lambda);
+            const Fx = jstat.poisson.cdf(bin, lambda);
 
             return {
                 bin,
@@ -77,54 +79,47 @@ export const BernulliWork = () => {
         setTableData(data);
     };
 
-    // Обновление выборки Бернулли при изменении probability или sampleSize
+    // Обновление выборки Пуассона при изменении lambda или sampleSize
     useEffect(() => {
-        if (sampleSize && probability && !testMode) {
-            const sample = Array.from({ length: sampleSize }, () => bernoulli(probability));
-            setBernoulliSample(sample);
+        if (sampleSize && lambda && !testMode) {
+            const sample = Array.from({ length: sampleSize }, () => poisson(lambda));
+            setPoissonSample(sample);
         }
-    }, [sampleSize, probability]);
+    }, [sampleSize, lambda]);
 
     // Расчет данных для таблицы при изменении выборки
     useEffect(() => {
         calculateTableData();
-    }, [bernoulliSample]);
+    }, [poissonSample]);
 
-    //Обработка тестовых данных
+    // Обработка тестовых данных
     useEffect(() => {
-        console.log(testFile)
-
         if (!testFile) return
         setTestMode(true)
         const reader = new FileReader();
         reader.onload = function (e) {
             const workbook = read(e.target.result);
-
-            // Получение списка листов
             const sheetNames = workbook.SheetNames;
-            console.log('Листы:', sheetNames);
-
-            // Чтение данных из первого листа
-            const firstSheetName = sheetNames.find(name => name === 'Бернулли')
+            const firstSheetName = sheetNames.find(name => name === 'Пуассона')
             const worksheet = workbook.Sheets[firstSheetName];
 
-
-            const probabilityCell = 'D3'
-            if (worksheet[probabilityCell]) {
-                setProbability(worksheet[probabilityCell].v.toFixed(2))
+            const lambdaCell = 'D5'
+            if (worksheet[lambdaCell]) {
+                setLambda(+worksheet[lambdaCell].v.toFixed(2))
             }
 
-            const sampleSizeCell = 'D4'
+            const sampleSizeCell = 'D6'
             if (worksheet[sampleSizeCell]) {
-                setSampleSize(worksheet[sampleSizeCell].v.toFixed(0))
+                setSampleSize(+worksheet[sampleSizeCell].v.toFixed(0))
             }
 
-            const bernoulliSample = getRangeData(worksheet, 'B8', 'B126')
-            setBernoulliSample(bernoulliSample)
+            const poissonSample = getRangeData(worksheet, 'B9', 'B127')
+            setPoissonSample(poissonSample)
         }
 
         reader.readAsArrayBuffer(testFile);
     }, [testFile])
+
     return (
         <Box display={'flex'} gap={"16px"} flexDirection={'column'}>
             <Box display={'flex'} gap={"16px"} alignItems={'center'}>
@@ -138,19 +133,18 @@ export const BernulliWork = () => {
 
             <Box display={'flex'} gap={"16px"} flexDirection={'column'}>
                 <Box display={'flex'} gap={"16px"} flexDirection={'column'} >
-                    <Typography variant='h6'>Вероятность событий: {probability}</Typography>
+                    <Typography variant='h6'>Параметр λ: {lambda}</Typography>
                     <Slider
-                        min={0.2}
-                        max={0.8}
+                        min={1}
+                        max={5}
                         step={0.1}
                         disableSwap
-                        getAriaLabel={() => 'Диапазон вероятностей'}
-                        value={probabilityRange}
-                        onChange={(e, newValue) => setProbabilityRange(newValue as number[])}
+                        getAriaLabel={() => 'Диапазон параметра λ'}
+                        value={lambdaRange}
+                        onChange={(e, newValue) => setLambdaRange(newValue as number[])}
                         valueLabelDisplay="auto"
-
                     />
-                    <Button onClick={getProbability} disabled={testMode}>Получить вероятность</Button>
+                    <Button onClick={getLambda} disabled={testMode}>Получить λ</Button>
                 </Box>
 
                 <Box display={'flex'} gap={"16px"} flexDirection={'column'}>
@@ -158,37 +152,34 @@ export const BernulliWork = () => {
                     <Slider
                         min={100}
                         max={200}
-
                         disableSwap
                         getAriaLabel={() => 'Диапазон объема'}
                         value={sampleSizeRange}
                         onChange={(e, newValue) => setSampleSizeRange(newValue as number[])}
                         valueLabelDisplay="auto"
-
                     />
                     <Button onClick={getSampleSize} disabled={testMode}>Получить объем</Button>
                 </Box>
             </Box>
-            {sampleSize && probability && <Box display={'flex'} gap={"16px"} flexDirection={'column'}>
+
+            {sampleSize && lambda && <Box display={'flex'} gap={"16px"} flexDirection={'column'}>
                 <Typography variant='h6'>График распределения</Typography>
                 <LineChart
                     xAxis={[{
-                        data: Array.from({ length: bernoulliSample.length }, (_, i) => i + 1),
+                        data: Array.from({ length: poissonSample.length }, (_, i) => i + 1),
                         label: 'Номер испытания',
                     }]}
                     series={[
                         {
-                            data: bernoulliSample, // Данные распределения Бернулли
-                            label: 'Результат (0 или 1)',
+                            data: poissonSample,
+                            label: 'Пуассона',
                         },
                     ]}
-
                     height={600}
                 />
 
                 <Box display={'flex'} gap={"16px"} flexDirection={'column'}>
                     <Typography variant='h6'>Гистограммы и распределения вероятностей</Typography>
-
                     <TableContainer component={Paper}>
                         <Table aria-label="simple table">
                             <TableHead>
@@ -220,16 +211,15 @@ export const BernulliWork = () => {
                 <Box>
                     <LineChart
                         xAxis={[{
-                            data: Array.from({ length: tableData.length }, (_, i) => i + 1),
+                            data: tableData.map(row => row.bin),
                             label: 'Карман',
                         }]}
                         series={[
                             {
-                                data: tableData.map(row => row.Fx), // Данные распределения Бернулли
+                                data: tableData.map(row => row.Fx),
                                 label: 'F(x)',
                             },
                         ]}
-
                         height={600}
                     />
                 </Box>
@@ -238,28 +228,26 @@ export const BernulliWork = () => {
                     <BarChart
                         xAxis={[
                             {
-                                data: ['Карман 0', 'Карман 1'], // Подписи для столбцов
-                                scaleType: 'band', // Используем band для категориальных данных
+                                data: tableData.map(row => 'Карман ' + row.bin),
+                                scaleType: 'band',
                             },
                         ]}
                         series={[
                             {
-                                data: tableData.map(row => row.frequency), // Количество значений для каждого кармана
-                                label: 'Количество значений', // Подпись для серии
+                                data: tableData.map(row => row.frequency),
+                                label: 'Количество значений',
                             },
                         ]}
-
                         height={600}
                     />
                 </Box>
-
 
                 <Box>
                     <BarChart
                         xAxis={[
                             {
-                                data: ['Карман 0', 'Карман 1'], // Подписи для столбцов
-                                scaleType: 'band', // Используем band для категориальных данных
+                                data: tableData.map(row => 'Карман ' + row.bin),
+                                scaleType: 'band',
                             },
                         ]}
                         series={[
@@ -272,14 +260,10 @@ export const BernulliWork = () => {
                                 label: 'Теоретическая вероятность'
                             }
                         ]}
-
                         height={600}
                     />
                 </Box>
             </Box>}
         </Box>
-
-
     )
-
 }
